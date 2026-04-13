@@ -418,7 +418,24 @@ function ScanView({ onSave, onCancel, editData }) {
           else {
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
             const clean = text.replace(/```json|```/g, "").trim();
-            const jsonParsed = JSON.parse(clean);
+            // Fix unescaped newlines/tabs inside JSON strings
+            const safeJson = clean.replace(/\n/g, "\\n").replace(/\r/g, "").replace(/\t/g, " ");
+            // Try parsing, fallback to regex extraction
+            let jsonParsed = {};
+            try { jsonParsed = JSON.parse(safeJson); } catch(e2) {
+              try {
+                // Extract JSON object from messy text
+                const m = clean.match(/\{[\s\S]*\}/);
+                if (m) {
+                  const fixed = m[0].replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ");
+                  jsonParsed = JSON.parse(fixed);
+                }
+              } catch(e3) {
+                // Last resort: extract fields with regex
+                const rx = (key) => { const r = new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"'); const m2 = clean.match(r); return m2 ? m2[1] : ""; };
+                jsonParsed = {companyName:rx("companyName"),companyNameCn:rx("companyNameCn"),name:rx("name"),position:rx("position"),department:rx("department"),phone:rx("phone"),mobile:rx("mobile"),email:rx("email"),wechat:rx("wechat"),address:rx("address"),website:rx("website")};
+              }
+            }
             setForm(f => ({ ...f, ...Object.fromEntries(Object.entries(jsonParsed).filter(([_, v]) => v)), cardImage: dataUrl }));
             setScanned(true);
           }
