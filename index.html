@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#0C0E14"/>
+<meta name="application-name" content="Canton Fair CRM"/>
+<meta name="apple-mobile-web-app-title" content="Canton Fair CRM"/>
+<title>Canton Fair CRM — Gemini AI 명함 스캔 & 고객관리</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📇</text></svg>"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body, #root { height: 100%; }
+  body { background: #0C0E14; font-family: 'Apple SD Gothic Neo', -apple-system, 'Noto Sans KR', sans-serif; overscroll-behavior: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Constants ───
+const STORAGE_KEY = "cf-bizcard-v1";
+
+const CATEGORIES = [
+  { id: "electronics", label: "전자/전기", icon: "⚡", color: "#3B82F6" },
+  { id: "machinery", label: "기계/장비", icon: "⚙️", color: "#8B5CF6" },
+  { id: "lighting", label: "조명/LED", icon: "💡", color: "#F59E0B" },
+  { id: "building", label: "건축자재", icon: "🏗️", color: "#EF4444" },
+  { id: "consumer", label: "소비재", icon: "🛒", color: "#10B981" },
+  { id: "textile", label: "섬유/의류", icon: "👔", color: "#EC4899" },
+  { id: "chemical", label: "화학/소재", icon: "🧪", color: "#06B6D4" },
+  { id: "other", label: "기타", icon: "📦", color: "#6B7280" },
+];
+
+const HALLS = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2", "4.1", "4.2", "5.1", "5.2", "6.1", "7.1", "8.1", "9.1", "10.1", "기타"];
+
+const RATINGS = [
+  { value: 5, label: "최우수", color: "#10B981" },
+  { value: 4, label: "우수", color: "#22C55E" },
+  { value: 3, label: "보통", color: "#F59E0B" },
+  { value: 2, label: "미흡", color: "#F97316" },
+  { value: 1, label: "부적합", color: "#EF4444" },
+];
+
+const FOLLOWUP_STATUS = [
+  { id: "pending", label: "대기", color: "#F59E0B", bg: "rgba(245,158,11,0.15)" },
+  { id: "contacted", label: "연락완료", color: "#3B82F6", bg: "rgba(59,130,246,0.15)" },
+  { id: "sampling", label: "샘플요청", color: "#8B5CF6", bg: "rgba(139,92,246,0.15)" },
+  { id: "negotiating", label: "협상중", color: "#EC4899", bg: "rgba(236,72,153,0.15)" },
+  { id: "confirmed", label: "거래확정", color: "#10B981", bg: "rgba(16,185,129,0.15)" },
+  { id: "rejected", label: "불가", color: "#EF4444", bg: "rgba(239,68,68,0.15)" },
+];
+
+const VISIT_PURPOSES = ["제품조사", "가격협상", "샘플요청", "기존거래처", "신규발굴", "기타"];
+
+const emptyCard = {
+  companyName: "", companyNameCn: "", name: "", position: "", department: "",
+  phone: "", mobile: "", email: "", wechat: "", address: "", website: "",
+  category: "", hall: "", boothNo: "", visitPurpose: "",
+  products: "", unitPrice: "", moq: "", leadTime: "", certification: "",
+  rating: 3, status: "pending", memo: "", tags: [],
+  photos: [], cardImage: null,
+  visitDate: new Date().toISOString().split("T")[0],
+  nextContactDate: "",
+};
+
+// ─── Persistent Storage ───
+// ── API Key helpers ──
+function getApiKey() { try { return localStorage.getItem("cf-api-key") || ""; } catch(e) { return ""; } }
+function saveApiKey(k) { try { localStorage.setItem("cf-api-key", k); } catch(e) {} }
+
+// ─── Import/Export Functions ───
+function exportToCSV(cards) {
+  if (!cards.length) { alert("저장할 데이터가 없습니다"); return; }
+  const headers = ["회사명", "회사명(중문)", "담당자", "직급", "부서", "전화", "휴대폰", "이메일", "위챗", "주소", "홈페이지", "카테고리", "홀", "부스", "방문목적", "제품", "단가", "MOQ", "리드타임", "인증", "평점", "상태", "메모", "방문날짜", "다음연락"];
+  const rows = cards.map(c => [c.companyName, c.companyNameCn, c.name, c.position, c.department, c.phone, c.mobile, c.email, c.wechat, c.address, c.website, c.category, c.hall, c.boothNo, c.visitPurpose, c.products, c.unitPrice, c.moq, c.leadTime, c.certification, c.rating, c.status, c.memo, c.visitDate, c.nextContactDate]);
+  const csv = [headers, ...rows].map(row => row.map(cell => { const val = String(cell || ""); return val.includes(",") || val.includes('"') ? `"${val.replace(/"/g, '""')}"` : val; }).join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `cantonfair_${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function exportToExcel(cards) {
+  if (!cards.length) { alert("저장할 데이터가 없습니다"); return; }
+  const headers = ["회사명", "회사명(중문)", "담당자", "직급", "부서", "전화", "휴대폰", "이메일", "위챗", "주소", "홈페이지", "카테고리", "홀", "부스", "방문목적", "제품", "단가", "MOQ", "리드타임", "인증", "평점", "상태", "메모", "방문날짜", "다음연락"];
+  const rows = cards.map(c => [c.companyName, c.companyNameCn, c.name, c.position, c.department, c.phone, c.mobile, c.email, c.wechat, c.address, c.website, c.category, c.hall, c.boothNo, c.visitPurpose, c.products, c.unitPrice, c.moq, c.leadTime, c.certification, c.rating, c.status, c.memo, c.visitDate, c.nextContactDate]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = headers.map(() => ({ wch: 15 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "공급사");
+  XLSX.writeFile(wb, `cantonfair_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+function exportToJSON(cards) {
+  const data = { cards, exportDate: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `cantonfair_${new Date().toISOString().split('T')[0]}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+const parseJSON = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = e => { try { const data = JSON.parse(e.target.result); resolve(Array.isArray(data) ? data : data.cards || []); } catch(err) { reject("JSON 파일을 읽을 수 없습니다"); } };
+  reader.onerror = () => reject("파일 읽기 실패");
+  reader.readAsText(file);
+});
+
+const parseCSV = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const text = e.target.result;
+      const lines = text.split('\n');
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const cards = lines.slice(1).filter(l => l.trim()).map(line => {
+        const cells = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          if (line[i] === '"') inQuotes = !inQuotes;
+          else if (line[i] === ',' && !inQuotes) { cells.push(current.trim().replace(/^"|"$/g, '')); current = ''; }
+          else current += line[i];
+        }
+        cells.push(current.trim().replace(/^"|"$/g, ''));
+        const card = { ...emptyCard, id: Date.now() + Math.random() };
+        headers.forEach((h, i) => {
+          const val = cells[i] || '';
+          if (h === "회사명") card.companyName = val;
+          else if (h === "회사명(중문)") card.companyNameCn = val;
+          else if (h === "담당자") card.name = val;
+          else if (h === "직급") card.position = val;
+          else if (h === "부서") card.department = val;
+          else if (h === "전화") card.phone = val;
+          else if (h === "휴대폰") card.mobile = val;
+          else if (h === "이메일") card.email = val;
+          else if (h === "위챗") card.wechat = val;
+          else if (h === "주소") card.address = val;
+          else if (h === "홈페이지") card.website = val;
+          else if (h === "카테고리") card.category = val;
+          else if (h === "홀") card.hall = val;
+          else if (h === "부스") card.boothNo = val;
+          else if (h === "방문목적") card.visitPurpose = val;
+          else if (h === "제품") card.products = val;
+          else if (h === "단가") card.unitPrice = val;
+          else if (h === "MOQ") card.moq = val;
+          else if (h === "리드타임") card.leadTime = val;
+          else if (h === "인증") card.certification = val;
+          else if (h === "평점") card.rating = parseInt(val) || 3;
+          else if (h === "상태") card.status = val || "pending";
+          else if (h === "메모") card.memo = val;
+          else if (h === "방문날짜") card.visitDate = val || new Date().toISOString().split('T')[0];
+          else if (h === "다음연락") card.nextContactDate = val;
+        });
+        return card;
+      });
+      resolve(cards);
+    } catch(err) { reject("CSV 파일을 읽을 수 없습니다"); }
+  };
+  reader.onerror = () => reject("파일 읽기 실패");
+  reader.readAsText(file);
+});
+
+const parseExcel = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+      const cards = rows.map(row => {
+        const card = { ...emptyCard, id: Date.now() + Math.random() };
+        Object.keys(row).forEach(key => {
+          const val = String(row[key] || '');
+          if (key === "회사명") card.companyName = val;
+          else if (key === "회사명(중문)") card.companyNameCn = val;
+          else if (key === "담당자") card.name = val;
+          else if (key === "직급") card.position = val;
+          else if (key === "부서") card.department = val;
+          else if (key === "전화") card.phone = val;
+          else if (key === "휴대폰") card.mobile = val;
+          else if (key === "이메일") card.email = val;
+          else if (key === "위챗") card.wechat = val;
+          else if (key === "주소") card.address = val;
+          else if (key === "홈페이지") card.website = val;
+          else if (key === "카테고리") card.category = val;
+          else if (key === "홀") card.hall = val;
+          else if (key === "부스") card.boothNo = val;
+          else if (key === "방문목적") card.visitPurpose = val;
+          else if (key === "제품") card.products = val;
+          else if (key === "단가") card.unitPrice = val;
+          else if (key === "MOQ") card.moq = val;
+          else if (key === "리드타임") card.leadTime = val;
+          else if (key === "인증") card.certification = val;
+          else if (key === "평점") card.rating = parseInt(val) || 3;
+          else if (key === "상태") card.status = val || "pending";
+          else if (key === "메모") card.memo = val;
+          else if (key === "방문날짜") card.visitDate = val || new Date().toISOString().split('T')[0];
+          else if (key === "다음연락") card.nextContactDate = val;
+        });
+        return card;
+      });
+      resolve(cards);
+    } catch(err) { reject("엑셀 파일을 읽을 수 없습니다"); }
+  };
+  reader.onerror = () => reject("파일 읽기 실패");
+  reader.readAsArrayBuffer(file);
+});
+
+function useStorage() {
+  const [cards, setCards] = useState([]);
+  const [calcHistory, setCalcHistory] = useState([]);
+  const loaded = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (Array.isArray(p)) setCards(p);
+        else { setCards(p.cards || []); setCalcHistory(p.calcHistory || []); }
+      }
+    } catch(e) {}
+    loaded.current = true;
+  }, []);
+  useEffect(() => {
+    if (!loaded.current) return;
+    const t = setTimeout(() => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ cards, calcHistory })); } catch(e) {}
+    }, 400);
+    return () => clearTimeout(t);
+  }, [cards, calcHistory]);
+  return [cards, setCards, calcHistory, setCalcHistory];
+}
+
+// ─── Theme ───
+const T = {
+  bg: "#0C0E14",
+  surface: "#151820",
+  card: "#1C1F2A",
+  cardHover: "#242835",
+  accent: "#D4915E",
+  accentLight: "#E8A872",
+  accentDim: "rgba(212,145,94,0.12)",
+  gold: "#D4AF37",
+  text: "#E8E4DF",
+  textSec: "#9A9590",
+  textDim: "#5C5752",
+  border: "#2A2D38",
+  inputBg: "#12141C",
+  green: "#22C55E",
+  greenDim: "rgba(34,197,94,0.12)",
+  red: "#EF4444",
+  blue: "#3B82F6",
+  blueDim: "rgba(59,130,246,0.12)",
+};
+
+// ─── Icons ───
+const Icon = {
+  scan: <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>,
+  list: <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>,
+  chart: <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>,
+  plus: <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>,
+  search: <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>,
+  trash: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>,
+  edit: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  download: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>,
+  star: (filled) => <svg width="20" height="20" viewBox="0 0 24 24" fill={filled?"#D4AF37":"none"} stroke={filled?"#D4AF37":"#5C5752"} strokeWidth="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>,
+  chevDown: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="6,9 12,15 18,9"/></svg>,
+  chevUp: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="18,15 12,9 6,15"/></svg>,
+  camera: <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="6" width="20" height="14" rx="3"/><circle cx="12" cy="13" r="4"/><path d="M7 6V5a2 2 0 012-2h6a2 2 0 012 2v1"/><circle cx="17" cy="9" r="1" fill="currentColor"/></svg>,
+  ai: <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>,
+  wechat: <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM12.797 16.122c-1.46 0-2.888-.416-4.102-1.2a7.46 7.46 0 01-.296-.192c-.28-.192-.619-.274-.948-.18l-1.08.632.22-.836a1.07 1.07 0 00-.387-1.21C4.93 12.163 4 10.702 4 9.08c0-3.405 3.368-6.187 7.5-6.187S19 5.675 19 9.08c0 3.405-2.787 7.042-6.203 7.042z"/></svg>,
+  pdf: <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><path d="M9 15h6M9 11h6"/></svg>,
+  calc: <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 14h2M14 14h2M8 18h2M14 18h2M8 10h8"/></svg>,
+  link: <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>,
+};
+
+// ─── Shared Components ───
+function Input({ label, ...props }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {label && <label style={{ fontSize: 11, color: T.textSec, fontWeight: 500 }}>{label}</label>}
+      <input {...props} style={{
+        width: "100%", padding: "10px 12px", background: T.inputBg,
+        border: `1px solid ${T.border}`, borderRadius: 10, color: T.text,
+        fontSize: 14, outline: "none", boxSizing: "border-box",
+        ...props.style,
+      }} />
+    </div>
+  );
+}
+
+function TextArea({ label, ...props }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {label && <label style={{ fontSize: 11, color: T.textSec, fontWeight: 500 }}>{label}</label>}
+      <textarea {...props} style={{
+        width: "100%", padding: "10px 12px", background: T.inputBg,
+        border: `1px solid ${T.border}`, borderRadius: 10, color: T.text,
+        fontSize: 14, outline: "none", resize: "vertical", minHeight: 56,
+        fontFamily: "inherit", boxSizing: "border-box", ...props.style,
+      }} />
+    </div>
+  );
+}
+
+function Btn({ children, variant = "primary", ...props }) {
+  const s = {
+    primary: { background: T.accent, color: "#fff" },
+    secondary: { background: T.card, color: T.text, border: `1px solid ${T.border}` },
+    ghost: { background: "transparent", color: T.textSec },
+    danger: { background: "rgba(239,68,68,0.12)", color: "#EF4444" },
+    success: { background: "rgba(34,197,94,0.12)", color: "#22C55E" },
+  };
+  return (
+    <button {...props} style={{
+      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+      padding: "10px 16px", borderRadius: 10, border: "none", fontSize: 14,
+      fontWeight: 600, cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+      ...s[variant], ...props.style,
+    }}>{children}</button>
+  );
+}
+
+function StarRating({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {[1,2,3,4,5].map(i => (
+        <button key={i} onClick={() => onChange?.(i)} style={{
+          background: "none", border: "none", padding: 1, cursor: "pointer",
+        }}>{Icon.star(i <= value)}</button>
+      ))}
+    </div>
+  );
+}
+
+function Badge({ children, color = T.accent, bg }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700,
+      padding: "2px 8px", borderRadius: 99, color,
+      background: bg || `${color}20`, letterSpacing: 0.3,
+    }}>{children}</span>
+  );
+}
+
+function Select({ label, options, ...props }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {label && <label style={{ fontSize: 11, color: T.textSec, fontWeight: 500 }}>{label}</label>}
+      <select {...props} style={{
+        width: "100%", padding: "10px 12px", background: T.inputBg,
+        border: `1px solid ${T.border}`, borderRadius: 10, color: T.text,
+        fontSize: 14, outline: "none", ...props.style,
+      }}>
+        <option value="">선택</option>
+        {options.map(o => typeof o === "string"
+          ? <option key={o} value={o}>{o}</option>
+          : <option key={o.value} value={o.value}>{o.label}</option>
+        )}
+      </select>
+    </div>
+  );
+}
+
+// ─── CARD FORM + AI SCAN COMPONENT ───
+function ScanView({ onSave, onCancel, editData }) {
+  const [scanning, setScanning] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [form, setForm] = useState(editData || { ...emptyCard });
+  const [cardPreview, setCardPreview] = useState(editData?.cardImage || null);
+  const [section, setSection] = useState("basic");
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
+
+  const updateForm = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  // ── Text Parser ──
+  const parseBusinessCardText = (text) => {
+    const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+    const result = {};
+
+    const emailRx = /[\w.+-]+@[\w.-]+\.\w{2,}/i;
+    const phoneRx = /[\+]?[\d\s\-().]{7,}/;
+    const urlRx = /(?:https?:\/\/)?(?:www\.)?[\w.-]+\.\w{2,}/i;
+    const wechatRx = /(?:wechat|微信|WeChat)\s*[:：]?\s*(\S+)/i;
+
+    const positionKw = ['manager','director','president','ceo','cfo','coo','cto','vp','supervisor','chairman','chief','head','officer','executive','engineer','representative','sales','marketing','coordinator','assistant','specialist','general','deputy','senior','junior','lead','team','dept','division'];
+    const deptKw = ['department','dept','division','team','부서','部门','部門','sales','marketing','export','import','trade','engineering','R&D','QC','quality'];
+
+    const foundEmails = [];
+    const foundPhones = [];
+    const foundUrls = [];
+    const otherLines = [];
+
+    lines.forEach(line => {
+      const wm = line.match(wechatRx);
+      if (wm) { result.wechat = wm[1]; return; }
+
+      const em = line.match(emailRx);
+      if (em) { foundEmails.push(em[0]); 
+        const rest = line.replace(em[0], '').trim();
+        if (rest && !result.name) otherLines.push(rest);
+        return; 
+      }
+
+      const um = line.match(urlRx);
+      if (um && !line.includes('@')) {
+        let url = um[0];
+        if (!url.startsWith('http')) url = 'https://' + url;
+        foundUrls.push(url);
+        return;
+      }
+
+      const pm = line.match(phoneRx);
+      if (pm && pm[0].replace(/\D/g,'').length >= 7) {
+        foundPhones.push(pm[0].trim());
+        const label = line.replace(pm[0], '').trim().toLowerCase();
+        if (label.includes('mob') || label.includes('cell') || label.includes('휴대') || label.includes('手机')) {
+          result._mobileIdx = foundPhones.length - 1;
+        }
+        return;
+      }
+
+      otherLines.push(line);
+    });
+
+    if (foundEmails.length > 0) result.email = foundEmails[0];
+    if (foundUrls.length > 0) result.website = foundUrls[0];
+
+    if (foundPhones.length === 1) {
+      result.phone = foundPhones[0];
+    } else if (foundPhones.length >= 2) {
+      if (result._mobileIdx !== undefined) {
+        result.mobile = foundPhones[result._mobileIdx];
+        result.phone = foundPhones.find((_, i) => i !== result._mobileIdx) || '';
+      } else {
+        result.phone = foundPhones[0];
+        result.mobile = foundPhones[1];
+      }
+    }
+    delete result._mobileIdx;
+
+    // Classify other lines
+    otherLines.forEach((line, i) => {
+      const lower = line.toLowerCase();
+
+      // Address patterns
+      if (/\d{5,6}/.test(line) || /省|市|区|road|street|floor|building|guangzhou|shenzhen|shanghai|dong|lu|区|号|栋|층|로|길/i.test(line)) {
+        if (!result.address) { result.address = line; return; }
+      }
+
+      // Position
+      if (positionKw.some(k => lower.includes(k)) || /총|이사|대표|부장|과장|사원|팀장|실장|경리|主任|经理|总监/.test(line)) {
+        if (!result.position) { result.position = line; return; }
+      }
+
+      // Department
+      if (deptKw.some(k => lower.includes(k))) {
+        if (!result.department) { result.department = line; return; }
+      }
+
+      // Company (usually longest line or has Co./Ltd/Inc/公司/有限)
+      if (/co\.|ltd|inc|corp|gmbh|llc|plc|公司|有限|집단|그룹|enterprise|industry|trading|technology|tech/i.test(line)) {
+        if (!result.companyName) { result.companyName = line; return; }
+        if (!result.companyNameCn && /[\u4e00-\u9fff]/.test(line)) { result.companyNameCn = line; return; }
+      }
+
+      // Remaining: guess name vs company
+      if (i === 0 && !result.companyName && line.length > 10) {
+        result.companyName = line;
+      } else if (!result.name && line.length <= 20 && !/\d/.test(line)) {
+        result.name = line;
+      } else if (!result.companyName) {
+        result.companyName = line;
+      }
+    });
+
+    // Chinese company name detection
+    if (result.companyName && /[\u4e00-\u9fff]/.test(result.companyName) && !result.companyNameCn) {
+      result.companyNameCn = result.companyName;
+    }
+
+    return result;
+  };
+
+  const doParse = () => {
+    if (!pasteText.trim()) return;
+    const p = parseBusinessCardText(pasteText);
+    setParsed(p);
+  };
+
+  const applyParsed = () => {
+    if (!parsed) return;
+    setForm(f => ({
+      ...f,
+      ...Object.fromEntries(Object.entries(parsed).filter(([_, v]) => v)),
+    }));
+    setShowPaste(false);
+    setPasteText("");
+    setParsed(null);
+  };
+
+  const processImage = async (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setScanError("");
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 600;
+        let w = img.width, h = img.height;
+        if (w > h) { h = h * MAX / w; w = MAX; } else { w = w * MAX / h; h = MAX; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+        const b64 = dataUrl.split(",")[1];
+        setCardPreview(dataUrl);
+
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          setForm(f => ({ ...f, cardImage: dataUrl }));
+          setScanError("API 키가 없어 AI 인식을 건너뜁니다. 수동으로 입력하세요.");
+          return;
+        }
+
+        setScanning(true);
+        try {
+          const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { inlineData: { mimeType: "image/jpeg", data: b64 } },
+                  { text: "이 명함에서 정보를 추출하세요. JSON만 응답 (다른 텍스트 없이):\n{\"companyName\":\"\",\"companyNameCn\":\"\",\"name\":\"\",\"position\":\"\",\"department\":\"\",\"phone\":\"\",\"mobile\":\"\",\"email\":\"\",\"wechat\":\"\",\"address\":\"\",\"website\":\"\"}\n없는 필드는 빈 문자열로." }
+                ]
+              }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
+            }),
+          });
+          const data = await resp.json();
+          if (data.error) { setScanError("API 오류: " + (data.error.message || "알 수 없음")); setForm(f => ({ ...f, cardImage: dataUrl })); }
+          else {
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+            const clean = text.replace(/```json|```/g, "").trim();
+            // Fix unescaped newlines/tabs inside JSON strings
+            const safeJson = clean.replace(/\n/g, "\\n").replace(/\r/g, "").replace(/\t/g, " ");
+            // Try parsing, fallback to regex extraction
+            let jsonParsed = {};
+            try { jsonParsed = JSON.parse(safeJson); } catch(e2) {
+              try {
+                // Extract JSON object from messy text
+                const m = clean.match(/\{[\s\S]*\}/);
+                if (m) {
+                  const fixed = m[0].replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ");
+                  jsonParsed = JSON.parse(fixed);
+                }
+              } catch(e3) {
+                // Last resort: extract fields with regex
+                const rx = (key) => { const r = new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"'); const m2 = clean.match(r); return m2 ? m2[1] : ""; };
+                jsonParsed = {companyName:rx("companyName"),companyNameCn:rx("companyNameCn"),name:rx("name"),position:rx("position"),department:rx("department"),phone:rx("phone"),mobile:rx("mobile"),email:rx("email"),wechat:rx("wechat"),address:rx("address"),website:rx("website")};
+              }
+            }
+            setForm(f => ({ ...f, ...Object.fromEntries(Object.entries(jsonParsed).filter(([_, v]) => v)), cardImage: dataUrl }));
+            setScanned(true);
+          }
+        } catch (err) {
+          setScanError("스캔 실패: " + err.message);
+          setForm(f => ({ ...f, cardImage: dataUrl }));
+        }
+        setScanning(false);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFile = (e) => { const f = e.target.files?.[0]; if (f) processImage(f); };
+
+  const save = () => {
+    if (!form.companyName && !form.name) { alert("회사명 또는 담당자명을 입력하세요"); return; }
+    onSave({ ...form });
+  };
+
+  const sections = [
+    { id: "basic", label: "기본정보" },
+    { id: "product", label: "제품/거래" },
+    { id: "eval", label: "평가/메모" },
+  ];
+
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, background: T.bg, overflowY: "auto" }}>
+      <div style={{
+        position: "sticky", top: 0, zIndex: 10, padding: "14px 20px",
+        background: T.surface, borderBottom: "1px solid " + T.border,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <button onClick={onCancel} style={{ background: "none", border: "none", color: T.textSec, fontSize: 15, cursor: "pointer" }}>✕ 취소</button>
+        <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{editData ? "✏️ 카드 수정" : "📇 신규 등록"}</span>
+        <Btn onClick={save} style={{ padding: "8px 16px", fontSize: 13 }}>저장</Btn>
+      </div>
+
+      <div style={{ padding: "16px 20px 100px", maxWidth: 480, margin: "0 auto" }}>
+        {/* Scan Area */}
+        {!editData && (
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, marginBottom: 20, border: "1px solid " + T.border }}>
+            <div style={{ textAlign: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.accent, marginBottom: 4 }}>🤖 AI 명함 스캔</div>
+              <div style={{ fontSize: 11, color: T.textDim }}>명함을 촬영하면 자동으로 정보를 인식합니다</div>
+            </div>
+
+            {cardPreview ? (
+              <div style={{ position: "relative" }}>
+                <img src={cardPreview} alt="" style={{ width: "100%", borderRadius: 12, border: "1px solid " + T.border }} />
+                {scanning && (
+                  <div style={{ position: "absolute", inset: 0, borderRadius: 12, background: "rgba(0,0,0,0.7)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                    <div style={{ width: 36, height: 36, border: "3px solid " + T.accent, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                    <span style={{ color: T.accent, fontSize: 13, fontWeight: 600 }}>AI 인식 중...</span>
+                  </div>
+                )}
+                {scanned && <div style={{ position: "absolute", top: 8, right: 8, background: T.green, color: "#fff", borderRadius: 99, padding: "4px 10px", fontSize: 11, fontWeight: 700 }}>✓ 인식 완료</div>}
+                <button onClick={() => { setCardPreview(null); setScanned(false); setScanError(""); }} style={{ position: "absolute", bottom: 8, right: 8, background: T.card, color: T.text, border: "1px solid " + T.border, borderRadius: 8, padding: "6px 10px", fontSize: 11, cursor: "pointer" }}>다시 선택</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button onClick={() => cameraRef.current?.click()} style={{ width: "100%", padding: "20px", background: T.accent + "12", border: "2px solid " + T.accent + "44", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: T.text }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: T.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📷</div>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>카메라 촬영</div>
+                    <div style={{ fontSize: 12, color: T.textSec, marginTop: 2 }}>명함을 직접 촬영합니다</div>
+                  </div>
+                </button>
+                <button onClick={() => galleryRef.current?.click()} style={{ width: "100%", padding: "20px", background: T.inputBg, border: "2px solid " + T.border, borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: T.text }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: T.card, border: "1px solid " + T.border, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🖼️</div>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>갤러리 선택</div>
+                    <div style={{ fontSize: 12, color: T.textSec, marginTop: 2 }}>저장된 명함 사진을 선택</div>
+                  </div>
+                </button>
+                <button onClick={() => setShowPaste(true)} style={{ width: "100%", padding: "20px", background: "rgba(59,130,246,0.08)", border: "2px solid rgba(59,130,246,0.25)", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: T.text }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📋</div>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>텍스트 붙여넣기</div>
+                    <div style={{ fontSize: 12, color: T.textSec, marginTop: 2 }}>구글렌즈 등으로 인식한 텍스트 붙여넣기</div>
+                  </div>
+                </button>
+              </div>
+            )}
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
+            <input ref={galleryRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+            {scanError && <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", fontSize: 12, color: "#F59E0B" }}>{scanError}</div>}
+            {!getApiKey() && !cardPreview && <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", fontSize: 11, color: "#60A5FA", lineHeight: 1.5 }}>💡 ⚙️ 설정에서 Gemini API 키(무료)를 입력하면 AI가 명함을 자동 인식합니다</div>}
+          </div>
+        )}
+
+        {/* Section Tabs */}
+        <div style={{ display: "flex", gap: 4, background: T.card, borderRadius: 12, padding: 4, marginBottom: 16 }}>
+          {sections.map(s => (
+            <button key={s.id} onClick={() => setSection(s.id)} style={{
+              flex: 1, padding: "10px 0", borderRadius: 10, border: "none",
+              background: section === s.id ? T.accent : "transparent",
+              color: section === s.id ? "#fff" : T.textSec,
+              fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}>{s.label}</button>
+          ))}
+        </div>
+
+        {section === "basic" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Input label="회사명 *" value={form.companyName} onChange={e => updateForm("companyName", e.target.value)} placeholder="Company Name" /></div>
+              <div style={{ flex: 1 }}><Input label="중문명" value={form.companyNameCn} onChange={e => updateForm("companyNameCn", e.target.value)} placeholder="中文名称" /></div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Input label="담당자명" value={form.name} onChange={e => updateForm("name", e.target.value)} placeholder="Name" /></div>
+              <div style={{ flex: 1 }}><Input label="직책" value={form.position} onChange={e => updateForm("position", e.target.value)} placeholder="Position" /></div>
+            </div>
+            <Input label="부서" value={form.department} onChange={e => updateForm("department", e.target.value)} placeholder="Department" />
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Input label="전화" value={form.phone} onChange={e => updateForm("phone", e.target.value)} placeholder="+86-xxx" /></div>
+              <div style={{ flex: 1 }}><Input label="모바일" value={form.mobile} onChange={e => updateForm("mobile", e.target.value)} /></div>
+            </div>
+            <Input label="이메일" value={form.email} onChange={e => updateForm("email", e.target.value)} placeholder="email@example.com" />
+            <Input label="위챗 ID" value={form.wechat} onChange={e => updateForm("wechat", e.target.value)} placeholder="WeChat ID" />
+            <Input label="주소" value={form.address} onChange={e => updateForm("address", e.target.value)} placeholder="Guangzhou, China" />
+            <Input label="웹사이트" value={form.website} onChange={e => updateForm("website", e.target.value)} placeholder="www.example.com" />
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Select label="전시관 (Hall)" value={form.hall} onChange={e => updateForm("hall", e.target.value)} options={HALLS} /></div>
+              <div style={{ flex: 1 }}><Input label="부스번호" value={form.boothNo} onChange={e => updateForm("boothNo", e.target.value)} placeholder="A12-34" /></div>
+            </div>
+            <Select label="카테고리" value={form.category} onChange={e => updateForm("category", e.target.value)} options={CATEGORIES.map(c => ({ value: c.id, label: c.icon + " " + c.label }))} />
+            <Select label="방문목적" value={form.visitPurpose} onChange={e => updateForm("visitPurpose", e.target.value)} options={VISIT_PURPOSES} />
+            <Input label="방문일" type="date" value={form.visitDate} onChange={e => updateForm("visitDate", e.target.value)} />
+          </div>
+        )}
+        {section === "product" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <TextArea label="주요 제품/모델" value={form.products} onChange={e => updateForm("products", e.target.value)} placeholder="제품명, 모델번호 등..." />
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Input label="단가 (USD)" value={form.unitPrice} onChange={e => updateForm("unitPrice", e.target.value)} placeholder="$0.00" /></div>
+              <div style={{ flex: 1 }}><Input label="MOQ" value={form.moq} onChange={e => updateForm("moq", e.target.value)} placeholder="500pcs" /></div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}><Input label="리드타임" value={form.leadTime} onChange={e => updateForm("leadTime", e.target.value)} placeholder="30일" /></div>
+              <div style={{ flex: 1 }}><Input label="인증" value={form.certification} onChange={e => updateForm("certification", e.target.value)} placeholder="CE, FCC..." /></div>
+            </div>
+          </div>
+        )}
+        {section === "eval" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 11, color: T.textSec, fontWeight: 500, marginBottom: 6, display: "block" }}>공급업체 평가</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <StarRating value={form.rating} onChange={v => updateForm("rating", v)} />
+                <span style={{ fontSize: 12, color: RATINGS.find(r => r.value === form.rating)?.color, fontWeight: 600 }}>{RATINGS.find(r => r.value === form.rating)?.label}</span>
+              </div>
+            </div>
+            <Select label="팔로업 상태" value={form.status} onChange={e => updateForm("status", e.target.value)} options={FOLLOWUP_STATUS.map(s => ({ value: s.id, label: s.label }))} />
+            <Input label="다음 연락일" type="date" value={form.nextContactDate} onChange={e => updateForm("nextContactDate", e.target.value)} />
+            <TextArea label="메모" value={form.memo} onChange={e => updateForm("memo", e.target.value)} placeholder="품질, 가격 경쟁력, 커뮤니케이션..." style={{ minHeight: 100 }} />
+          </div>
+        )}
+        {/* Paste Modal */}
+        {showPaste && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 300, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ width: "100%", maxWidth: 440, background: T.card, borderRadius: 20, padding: 22, border: "1px solid " + T.border, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: T.text }}>📋 텍스트 붙여넣기</span>
+                <button onClick={() => { setShowPaste(false); setPasteText(""); setParsed(null); }} style={{ background: "none", border: "none", color: T.textSec, fontSize: 18, cursor: "pointer" }}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: T.textSec, marginBottom: 12, lineHeight: 1.6 }}>
+                구글렌즈, 카메라 번역 등으로 인식한 명함 텍스트를 아래에 붙여넣으세요.
+              </div>
+              <textarea value={pasteText} onChange={e => { setPasteText(e.target.value); setParsed(null); }}
+                placeholder={"예시:\nShenzhen ABC Technology Co., Ltd\n张伟 Zhang Wei\nSales Manager\n+86-755-1234-5678\nzhang@abctech.com\nWeChat: zhangwei88"}
+                style={{ width: "100%", minHeight: 140, padding: "12px 14px", background: T.inputBg, border: "1px solid " + T.border, borderRadius: 12, color: T.text, fontSize: 14, outline: "none", resize: "vertical", fontFamily: "inherit", lineHeight: 1.6, boxSizing: "border-box" }}
+              />
+              <button onClick={doParse} style={{ width: "100%", padding: "12px", marginTop: 12, borderRadius: 10, border: "none", background: "#3B82F6", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>🔍 자동 분석</button>
+              {parsed && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.green, marginBottom: 10 }}>✅ 분석 결과</div>
+                  <div style={{ background: T.inputBg, borderRadius: 12, padding: 14, border: "1px solid " + T.border }}>
+                    {[
+                      ["회사명", parsed.companyName], ["중문명", parsed.companyNameCn],
+                      ["담당자", parsed.name], ["직책", parsed.position], ["부서", parsed.department],
+                      ["전화", parsed.phone], ["모바일", parsed.mobile],
+                      ["이메일", parsed.email], ["위챗", parsed.wechat],
+                      ["웹사이트", parsed.website], ["주소", parsed.address],
+                    ].filter(([_, v]) => v).map(([label, val]) => (
+                      <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid " + T.bg, fontSize: 13 }}>
+                        <span style={{ color: T.textDim, fontWeight: 600 }}>{label}</span>
+                        <span style={{ color: T.text, textAlign: "right", maxWidth: "60%", wordBreak: "break-all" }}>{val}</span>
+                      </div>
+                    ))}
+                    {Object.values(parsed).every(v => !v) && (
+                      <div style={{ fontSize: 12, color: T.textDim, textAlign: "center", padding: 10 }}>인식된 정보가 없습니다</div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button onClick={() => setParsed(null)} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1px solid " + T.border, background: T.inputBg, color: T.textSec, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>다시 분석</button>
+                    <button onClick={applyParsed} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: T.green, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✅ 적용하기</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 20 }}>
+          <Btn onClick={save} style={{ width: "100%", padding: "14px", fontSize: 15 }}>{"💾 " + (editData ? "수정 완료" : "카드 저장")}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CARD LIST VIEW ───
+function CardListView({ cards, onEdit, onDelete, onStatusChange }) {
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("date");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const filtered = cards.filter(c => {
+    const term = search.toLowerCase();
+    const matchSearch = !term || c.companyName?.toLowerCase().includes(term) ||
+      c.name?.toLowerCase().includes(term) || c.boothNo?.toLowerCase().includes(term) ||
+      c.products?.toLowerCase().includes(term);
+    const matchCat = filterCat === "all" || c.category === filterCat;
+    const matchStatus = filterStatus === "all" || c.status === filterStatus;
+    return matchSearch && matchCat && matchStatus;
+  }).sort((a, b) => {
+    if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
+    if (sortBy === "name") return (a.companyName || "").localeCompare(b.companyName || "");
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Search */}
+      <div style={{ position: "relative" }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: T.textDim }}>{Icon.search}</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="업체명, 담당자, 부스번호, 제품..."
+          style={{
+            width: "100%", padding: "12px 12px 12px 40px", background: T.card,
+            border: `1px solid ${T.border}`, borderRadius: 12, color: T.text,
+            fontSize: 14, outline: "none", boxSizing: "border-box",
+          }} />
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
+        <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{
+          padding: "6px 10px", background: T.card, border: `1px solid ${T.border}`,
+          borderRadius: 8, color: T.text, fontSize: 12,
+        }}>
+          <option value="all">전체 카테고리</option>
+          {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{
+          padding: "6px 10px", background: T.card, border: `1px solid ${T.border}`,
+          borderRadius: 8, color: T.text, fontSize: 12,
+        }}>
+          <option value="all">전체 상태</option>
+          {FOLLOWUP_STATUS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
+          padding: "6px 10px", background: T.card, border: `1px solid ${T.border}`,
+          borderRadius: 8, color: T.text, fontSize: 12,
+        }}>
+          <option value="date">최신순</option>
+          <option value="rating">평점순</option>
+          <option value="name">이름순</option>
+        </select>
+      </div>
+
+      {/* Count */}
+      <div style={{ fontSize: 12, color: T.textDim }}>{filtered.length}개 카드</div>
+
+      {/* Cards */}
+      {filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: "48px 20px", color: T.textDim }}>
+          <div style={{ fontSize: 40, marginBottom: 10 }}>📇</div>
+          <div style={{ fontSize: 14 }}>등록된 카드가 없습니다</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>명함을 스캔하거나 직접 입력하세요</div>
+        </div>
+      )}
+
+      {filtered.map(card => {
+        const cat = CATEGORIES.find(c => c.id === card.category);
+        const status = FOLLOWUP_STATUS.find(s => s.id === card.status);
+        const isOpen = expandedId === card.id;
+
+        return (
+          <div key={card.id} style={{
+            background: T.card, borderRadius: 14, overflow: "hidden",
+            border: card.rating >= 4 ? `1px solid ${T.green}33` : `1px solid ${T.border}`,
+          }}>
+            {/* Card Header */}
+            <div onClick={() => setExpandedId(isOpen ? null : card.id)} style={{
+              padding: "14px 16px", cursor: "pointer", display: "flex", gap: 12, alignItems: "center",
+            }}>
+              {/* Booth Badge */}
+              <div style={{
+                width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+                background: cat ? `${cat.color}18` : T.inputBg,
+                display: "flex", flexDirection: "column", alignItems: "center",
+                justifyContent: "center", gap: 1,
+              }}>
+                <span style={{ fontSize: 14 }}>{cat?.icon || "📦"}</span>
+                <span style={{ fontSize: 9, fontWeight: 700, color: cat?.color || T.textDim }}>
+                  {card.boothNo || "—"}
+                </span>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {card.companyName || "(미입력)"}
+                </div>
+                <div style={{ fontSize: 12, color: T.textSec, marginTop: 2 }}>
+                  {card.name}{card.position ? ` · ${card.position}` : ""}
+                  {card.products ? ` — ${card.products.substring(0, 30)}` : ""}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                <div style={{ display: "flex", gap: 1 }}>
+                  {[1,2,3,4,5].map(i => (
+                    <svg key={i} width="10" height="10" viewBox="0 0 24 24"
+                      fill={i <= card.rating ? "#D4AF37" : "none"}
+                      stroke={i <= card.rating ? "#D4AF37" : "#444"}
+                      strokeWidth="2">
+                      <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
+                    </svg>
+                  ))}
+                </div>
+                {status && <Badge color={status.color} bg={status.bg}>{status.label}</Badge>}
+              </div>
+
+              <span style={{ color: T.textDim }}>{isOpen ? Icon.chevUp : Icon.chevDown}</span>
+            </div>
+
+            {/* Expanded */}
+            {isOpen && (
+              <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${T.border}` }}>
+                {/* Card Image */}
+                {card.cardImage && (
+                  <div style={{ marginTop: 12, marginBottom: 12 }}>
+                    <img src={card.cardImage} alt="명함" style={{
+                      width: "100%", borderRadius: 10, border: `1px solid ${T.border}`,
+                    }} />
+                  </div>
+                )}
+
+                {/* Info Grid */}
+                <div style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px",
+                  padding: "12px 0", fontSize: 13,
+                }}>
+                  {[
+                    ["회사(중문)", card.companyNameCn],
+                    ["전시관", card.hall ? `Hall ${card.hall}` : null],
+                    ["전화", card.phone],
+                    ["모바일", card.mobile],
+                    ["이메일", card.email],
+                    ["위챗", card.wechat],
+                    ["주소", card.address],
+                    ["웹사이트", card.website],
+                    ["카테고리", cat?.label],
+                    ["방문목적", card.visitPurpose],
+                    ["단가", card.unitPrice],
+                    ["MOQ", card.moq],
+                    ["리드타임", card.leadTime],
+                    ["인증", card.certification],
+                    ["방문일", card.visitDate],
+                    ["다음연락", card.nextContactDate],
+                  ].filter(([_, v]) => v).map(([label, val]) => (
+                    <div key={label}>
+                      <div style={{ color: T.textDim, fontSize: 10, marginBottom: 2 }}>{label}</div>
+                      <div style={{ color: T.text, wordBreak: "break-all" }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Products */}
+                {card.products && (
+                  <div style={{
+                    background: T.inputBg, borderRadius: 10, padding: 12,
+                    fontSize: 13, color: T.textSec, marginBottom: 8, lineHeight: 1.5,
+                  }}>
+                    <div style={{ fontSize: 10, color: T.textDim, marginBottom: 4 }}>주요 제품</div>
+                    {card.products}
+                  </div>
+                )}
+
+                {/* Memo */}
+                {card.memo && (
+                  <div style={{
+                    background: T.accentDim, borderRadius: 10, padding: 12,
+                    fontSize: 13, color: T.textSec, marginBottom: 8, lineHeight: 1.5,
+                    borderLeft: `3px solid ${T.accent}`,
+                  }}>
+                    {card.memo}
+                  </div>
+                )}
+
+                {/* Product Photos */}
+                {card.photos?.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 10, paddingBottom: 4 }}>
+                    {card.photos.map((src, i) => (
+                      <img key={i} src={src} alt="" style={{
+                        width: 80, height: 80, objectFit: "cover", borderRadius: 8, flexShrink: 0,
+                      }} />
+                    ))}
+                  </div>
+                )}
+
+                {/* Status Change */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: T.textDim, marginBottom: 6 }}>상태 변경</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {FOLLOWUP_STATUS.map(s => (
+                      <button key={s.id} onClick={() => onStatusChange(card.id, s.id)} style={{
+                        padding: "4px 10px", borderRadius: 8, border: "none", fontSize: 11,
+                        fontWeight: 600, cursor: "pointer",
+                        background: card.status === s.id ? s.color : s.bg,
+                        color: card.status === s.id ? "#fff" : s.color,
+                      }}>{s.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn variant="secondary" onClick={() => onEdit(card)} style={{ flex: 1, fontSize: 13, padding: "8px" }}>
+                    {Icon.edit} 수정
+                  </Btn>
+                  <Btn variant="danger" onClick={() => onDelete(card.id)} style={{ flex: 1, fontSize: 13, padding: "8px" }}>
+                    {Icon.trash} 삭제
+                  </Btn>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── DASHBOARD VIEW ───
+function DashboardView({ cards }) {
+  const totalCards = cards.length;
+  const avgRating = totalCards ? (cards.reduce((a, c) => a + (c.rating || 0), 0) / totalCards).toFixed(1) : "—";
+  const topRated = cards.filter(c => c.rating >= 4).length;
+
+  // Category breakdown
+  const catCounts = {};
+  cards.forEach(c => { const k = c.category || "other"; catCounts[k] = (catCounts[k] || 0) + 1; });
+
+  // Status breakdown
+  const statusCounts = {};
+  cards.forEach(c => { const k = c.status || "pending"; statusCounts[k] = (statusCounts[k] || 0) + 1; });
+
+  // Hall breakdown
+  const hallCounts = {};
+  cards.forEach(c => { if (c.hall) hallCounts[c.hall] = (hallCounts[c.hall] || 0) + 1; });
+
+  // Top suppliers
+  const topSuppliers = [...cards].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 5);
+
+  // Export CSV
+  const exportCSV = () => {
+    const headers = "회사명,중문명,담당자,직책,전화,모바일,이메일,위챗,주소,전시관,부스,카테고리,제품,단가,MOQ,리드타임,인증,평점,상태,메모,방문일\n";
+    const rows = cards.map(c => {
+      const cat = CATEGORIES.find(ct => ct.id === c.category)?.label || "";
+      const st = FOLLOWUP_STATUS.find(s => s.id === c.status)?.label || "";
+      return [c.companyName, c.companyNameCn, c.name, c.position, c.phone, c.mobile,
+        c.email, c.wechat, c.address, c.hall, c.boothNo, cat, c.products,
+        c.unitPrice, c.moq, c.leadTime, c.certification, c.rating, st,
+        `"${(c.memo || "").replace(/"/g, '""')}"`, c.visitDate].join(",");
+    }).join("\n");
+    const blob = new Blob(["\uFEFF" + headers + rows], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `cantonfair_contacts_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* KPI Row */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        {[
+          { label: "총 카드", value: totalCards, color: T.accent },
+          { label: "평균 평점", value: avgRating, color: T.gold },
+          { label: "우수(4+)", value: topRated, color: T.green },
+        ].map(kpi => (
+          <div key={kpi.label} style={{
+            background: T.card, borderRadius: 14, padding: "14px", textAlign: "center",
+          }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: kpi.color }}>{kpi.value}</div>
+            <div style={{ fontSize: 11, color: T.textSec }}>{kpi.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Status Pipeline */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>📊 팔로업 파이프라인</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {FOLLOWUP_STATUS.map(s => {
+            const count = statusCounts[s.id] || 0;
+            const pct = totalCards ? (count / totalCards * 100) : 0;
+            return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: s.color, fontWeight: 600, width: 60 }}>{s.label}</span>
+                <div style={{ flex: 1, height: 8, background: T.inputBg, borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 99, background: s.color,
+                    width: `${pct}%`, transition: "width 0.4s",
+                  }} />
+                </div>
+                <span style={{ fontSize: 12, color: T.textSec, fontWeight: 600, width: 28, textAlign: "right" }}>{count}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Category */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>📁 카테고리별</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {CATEGORIES.filter(c => catCounts[c.id]).map(c => (
+            <div key={c.id} style={{
+              padding: "6px 12px", borderRadius: 10, background: `${c.color}15`,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span>{c.icon}</span>
+              <span style={{ fontSize: 12, color: c.color, fontWeight: 600 }}>{c.label}</span>
+              <span style={{
+                background: c.color, color: "#fff", borderRadius: 99,
+                padding: "1px 7px", fontSize: 11, fontWeight: 700,
+              }}>{catCounts[c.id]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Hall Map */}
+      {Object.keys(hallCounts).length > 0 && (
+        <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>🏛️ 전시관별 방문</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {Object.entries(hallCounts).sort(([a], [b]) => a.localeCompare(b)).map(([hall, cnt]) => (
+              <div key={hall} style={{
+                padding: "8px 14px", borderRadius: 10, background: T.inputBg,
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: T.accent }}>{cnt}</div>
+                <div style={{ fontSize: 10, color: T.textDim }}>Hall {hall}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top Suppliers */}
+      {topSuppliers.length > 0 && (
+        <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>⭐ TOP 공급업체</div>
+          {topSuppliers.map((c, i) => (
+            <div key={c.id} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+              borderBottom: i < topSuppliers.length - 1 ? `1px solid ${T.border}` : "none",
+            }}>
+              <span style={{
+                width: 24, height: 24, borderRadius: 99, flexShrink: 0,
+                background: i === 0 ? T.gold + "30" : T.inputBg,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, fontWeight: 800, color: i === 0 ? T.gold : T.textDim,
+              }}>{i + 1}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{c.companyName}</div>
+                <div style={{ fontSize: 11, color: T.textSec }}>{c.products?.substring(0, 40)}</div>
+              </div>
+              <div style={{ display: "flex", gap: 1 }}>
+                {[1,2,3,4,5].map(j => (
+                  <svg key={j} width="10" height="10" viewBox="0 0 24 24"
+                    fill={j <= c.rating ? "#D4AF37" : "none"} stroke={j <= c.rating ? "#D4AF37" : "#444"} strokeWidth="2">
+                    <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
+                  </svg>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Export */}
+      <Btn variant="secondary" onClick={exportCSV} style={{ width: "100%" }}>
+        {Icon.download} CSV 내보내기
+      </Btn>
+    </div>
+  );
+}
+
+// ─── CALCULATOR VIEW (BizCard Pro style + Supplier Linking) ───
+function CalcView({ cards, calcHistory, setCalcHistory }) {
+  const [linkedSupplier, setLinkedSupplier] = useState(null);
+  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+  const [activeCur, setActiveCur] = useState("USD");
+  const [rates, setRates] = useState({ USD: "1380", CNY: "190", JPY: "9.2" });
+  const [formulas, setFormulas] = useState({ USD: "*1.12*1.08", CNY: "*1.12*1.08", JPY: "*1.12*1.08" });
+  const [prices, setPrices] = useState({ USD: "", CNY: "", JPY: "" });
+  const [supplierName, setSupplierName] = useState("");
+  const [productName, setProductName] = useState("");
+
+  const CURRENCIES = [
+    { id: "USD", label: "① USD 달러", symbol: "$", color: "#22D3EE" },
+    { id: "CNY", label: "② CNY 위안", symbol: "¥", color: "#F59E0B" },
+    { id: "JPY", label: "③ JPY 엔", symbol: "¥", color: "#F87171" },
+  ];
+  const MARGINS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+  const cur = CURRENCIES.find(c => c.id === activeCur);
+  const fmt = n => (n === null || isNaN(n)) ? "—" : "₩" + Math.round(n).toLocaleString("ko-KR");
+
+  const evalCost = (unitPrice, rate, formula) => {
+    try {
+      const base = unitPrice * rate;
+      const clean = formula.replace(/[^0-9.*+\-/(). ]/g, "");
+      const cost = Function('"use strict";return (' + base + clean + ")")();
+      return isNaN(cost) ? null : cost;
+    } catch(e) { return null; }
+  };
+
+  const unitPrice = parseFloat(prices[activeCur]) || 0;
+  const rate = parseFloat(rates[activeCur]) || 0;
+  const cost = unitPrice > 0 && rate > 0 ? evalCost(unitPrice, rate, formulas[activeCur]) : null;
+
+  const linkSupplier = (card) => {
+    setLinkedSupplier(card);
+    setSupplierName(card.companyName || "");
+    setProductName(card.products || "");
+    const priceNum = card.unitPrice?.replace(/[^0-9.]/g, "") || "";
+    if (priceNum) setPrices(p => ({ ...p, USD: priceNum }));
+    setShowSupplierPicker(false);
+  };
+
+  const saveCalc = () => {
+    if (!unitPrice || cost === null) return;
+    setCalcHistory(prev => [
+      {
+        id: Date.now(), supplierName, productName,
+        currency: activeCur, unitPrice: prices[activeCur],
+        rate: rates[activeCur], formula: formulas[activeCur],
+        cost: Math.round(cost),
+        linkedSupplierId: linkedSupplier?.id || null,
+        timestamp: new Date().toISOString(),
+      },
+      ...(prev || []).slice(0, 29),
+    ]);
+  };
+
+  const deleteCalc = (id) => {
+    setCalcHistory(prev => (prev || []).filter(h => h.id !== id));
+  };
+
+  const loadCalc = (h) => {
+    setActiveCur(h.currency || "USD");
+    setRates(r => ({ ...r, [h.currency || "USD"]: h.rate || "1380" }));
+    setFormulas(f => ({ ...f, [h.currency || "USD"]: h.formula || "*1.12*1.08" }));
+    setPrices(p => ({ ...p, [h.currency || "USD"]: h.unitPrice || "" }));
+    setSupplierName(h.supplierName || "");
+    setProductName(h.productName || "");
+    if (h.linkedSupplierId) {
+      const found = cards.find(c => c.id === h.linkedSupplierId);
+      if (found) setLinkedSupplier(found);
+    }
+  };
+
+  const resetFormula = () => {
+    setFormulas(f => ({ ...f, [activeCur]: "*1.12*1.08" }));
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Supplier Link */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>🔗 공급업체 연동</span>
+          <Btn variant="secondary" onClick={() => setShowSupplierPicker(true)} style={{ padding: "6px 12px", fontSize: 12 }}>
+            {Icon.link} 카드에서 불러오기
+          </Btn>
+        </div>
+        {linkedSupplier && (
+          <div style={{
+            background: T.accentDim, borderRadius: 10, padding: 10,
+            display: "flex", alignItems: "center", gap: 10,
+            borderLeft: `3px solid ${T.accent}`, marginBottom: 10,
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{linkedSupplier.companyName}</div>
+              <div style={{ fontSize: 11, color: T.textSec }}>
+                {linkedSupplier.products?.substring(0, 40)} · {linkedSupplier.unitPrice || "—"}
+              </div>
+            </div>
+            <button onClick={() => setLinkedSupplier(null)} style={{
+              background: "none", border: "none", color: T.textDim, cursor: "pointer", fontSize: 14,
+            }}>✕</button>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><Input label="공급업체명" value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="업체명" /></div>
+          <div style={{ flex: 1 }}><Input label="제품명" value={productName} onChange={e => setProductName(e.target.value)} placeholder="제품/모델" /></div>
+        </div>
+      </div>
+
+      {/* Supplier Picker Modal */}
+      {showSupplierPicker && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200,
+          background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "flex-end", justifyContent: "center",
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 480, maxHeight: "70vh", overflowY: "auto",
+            background: T.card, borderRadius: "20px 20px 0 0", padding: 20,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+              <span style={{ fontSize: 16, fontWeight: 700, color: T.text }}>📇 카드 선택</span>
+              <button onClick={() => setShowSupplierPicker(false)} style={{
+                background: "none", border: "none", color: T.textSec, fontSize: 18, cursor: "pointer",
+              }}>✕</button>
+            </div>
+            {cards.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 30, color: T.textDim, fontSize: 13 }}>등록된 카드가 없습니다</div>
+            ) : cards.map(card => (
+              <button key={card.id} onClick={() => linkSupplier(card)} style={{
+                width: "100%", textAlign: "left", padding: "12px 14px", marginBottom: 6,
+                background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: 10,
+                cursor: "pointer", display: "flex", alignItems: "center", gap: 10, color: T.text,
+              }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                  background: T.accentDim, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 10, fontWeight: 800, color: T.accent,
+                }}>{card.boothNo || "—"}</div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{card.companyName || "(미입력)"}</div>
+                  <div style={{ fontSize: 11, color: T.textSec }}>
+                    {card.products?.substring(0, 30) || "제품 미입력"} · {card.unitPrice || "—"}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Currency Tabs */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {CURRENCIES.map(c => (
+          <button key={c.id} onClick={() => setActiveCur(c.id)} style={{
+            flex: 1, padding: "9px 4px", borderRadius: 10, fontSize: 11,
+            fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+            background: activeCur === c.id ? `${c.color}18` : T.inputBg,
+            color: activeCur === c.id ? c.color : T.textDim,
+            border: `1.5px solid ${activeCur === c.id ? c.color : T.border}`,
+          }}>{c.label}</button>
+        ))}
+      </div>
+
+      {/* Formula Editor */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16, borderColor: `${cur.color}33`, borderWidth: 1, borderStyle: "solid" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: 1 }}>원가 계산식</span>
+          <button onClick={resetFormula} style={{
+            padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+            background: T.inputBg, border: `1px solid ${T.border}`, color: T.textSec, cursor: "pointer",
+          }}>초기화</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 13, color: T.textDim, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+            {cur.symbol} × rate
+          </span>
+          <input
+            value={formulas[activeCur]}
+            onChange={e => setFormulas(f => ({ ...f, [activeCur]: e.target.value }))}
+            style={{
+              flex: 1, padding: "8px 10px", background: T.inputBg,
+              border: `1px solid ${cur.color}55`, borderRadius: 8, color: T.text,
+              fontSize: 13, fontFamily: "monospace", outline: "none",
+            }}
+          />
+          <span style={{ fontSize: 11, color: T.textDim, whiteSpace: "nowrap" }}>=원가</span>
+        </div>
+        <div style={{
+          fontSize: 11, color: T.textDim, fontFamily: "monospace", padding: "6px 10px",
+          background: T.bg, borderRadius: 6,
+        }}>
+          Ex: {cur.symbol}10 × {rates[activeCur]} {formulas[activeCur]} = {fmt(evalCost(10, parseFloat(rates[activeCur]) || 0, formulas[activeCur]))}
+        </div>
+      </div>
+
+      {/* Rate + Price Input */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 4 }}>환율 (→ 원화 ₩)</label>
+            <input type="number" value={rates[activeCur]}
+              onChange={e => setRates(r => ({ ...r, [activeCur]: e.target.value }))}
+              style={{
+                width: "100%", padding: "10px 12px", background: T.inputBg,
+                border: `1px solid ${cur.color}44`, borderRadius: 10, color: T.text,
+                fontSize: 14, outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: 0.5, display: "block", marginBottom: 4 }}>단가 입력</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 15, color: cur.color, fontWeight: 700, width: 16 }}>{cur.symbol}</span>
+              <input type="number" value={prices[activeCur]} placeholder="단가"
+                onChange={e => setPrices(p => ({ ...p, [activeCur]: e.target.value }))}
+                style={{
+                  flex: 1, padding: "10px 12px", background: T.inputBg,
+                  border: `1px solid ${cur.color}44`, borderRadius: 10, color: T.text,
+                  fontSize: 14, outline: "none", boxSizing: "border-box",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Results */}
+      <div style={{ background: T.card, borderRadius: 14, padding: 16, border: `1px solid ${cur.color}33` }}>
+        {/* Cost */}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          paddingBottom: 12, marginBottom: 12, borderBottom: `1px solid ${T.border}`,
+        }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", marginBottom: 2 }}>원가 (Cost)</div>
+            <div style={{ fontSize: 11, color: T.textDim, fontFamily: "monospace" }}>
+              {cost !== null ? `${cur.symbol}${prices[activeCur]} × ${rates[activeCur]} ${formulas[activeCur]}` : "—"}
+            </div>
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: cur.color }}>
+            {fmt(cost)}
+          </div>
+        </div>
+
+        {/* Margin Table */}
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
+          예상 판매가
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ fontSize: 9, fontWeight: 700, color: T.textDim, textTransform: "uppercase", padding: "4px 6px", borderBottom: `1px solid ${T.border}`, textAlign: "left" }}>마진</th>
+              <th style={{ fontSize: 9, fontWeight: 700, color: T.textDim, textTransform: "uppercase", padding: "4px 6px", borderBottom: `1px solid ${T.border}`, textAlign: "right" }}>판매가</th>
+              <th style={{ fontSize: 9, fontWeight: 700, color: T.textDim, textTransform: "uppercase", padding: "4px 6px", borderBottom: `1px solid ${T.border}`, textAlign: "right" }}>단위이익</th>
+            </tr>
+          </thead>
+          <tbody>
+            {MARGINS.map(m => {
+              const sale = cost !== null ? Math.round(cost / (1 - m / 100)) : null;
+              const profit = sale !== null ? sale - Math.round(cost) : null;
+              const mColor = m <= 15 ? T.textSec : m <= 30 ? "#FBBF24" : T.green;
+              return (
+                <tr key={m}>
+                  <td style={{ padding: "7px 6px", borderBottom: `1px solid ${T.bg}`, fontSize: 13, fontWeight: 700, color: mColor }}>{m}%</td>
+                  <td style={{ padding: "7px 6px", borderBottom: `1px solid ${T.bg}`, fontSize: 13, fontWeight: 700, color: cur.color, textAlign: "right" }}>{fmt(sale)}</td>
+                  <td style={{ padding: "7px 6px", borderBottom: `1px solid ${T.bg}`, fontSize: 12, color: T.textSec, textAlign: "right" }}>{profit !== null ? "+" + fmt(profit) : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <Btn onClick={saveCalc} style={{ width: "100%", marginTop: 14, fontSize: 13 }}>💾 계산 결과 저장</Btn>
+      </div>
+
+      {/* History */}
+      {(calcHistory || []).length > 0 && (
+        <div style={{ background: T.card, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>📋 저장된 계산 ({calcHistory.length}건)</div>
+          {(calcHistory || []).map(h => {
+            const hCur = CURRENCIES.find(c => c.id === h.currency) || CURRENCIES[0];
+            return (
+              <div key={h.id} style={{
+                background: T.inputBg, borderRadius: 10, padding: 12, marginBottom: 8,
+                border: `1px solid ${T.border}`,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
+                      {h.supplierName || "미지정"} {h.productName ? `· ${h.productName}` : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>
+                      {new Date(h.timestamp).toLocaleDateString("ko")} · {hCur.symbol}{h.unitPrice} × {h.rate}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => loadCalc(h)} style={{
+                      background: T.blueDim, border: "none", color: T.blue,
+                      borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                    }}>불러오기</button>
+                    <button onClick={() => deleteCalc(h.id)} style={{
+                      background: "rgba(239,68,68,0.1)", border: "none", color: T.red,
+                      borderRadius: 6, padding: "4px 6px", fontSize: 11, cursor: "pointer",
+                    }}>{Icon.trash}</button>
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, alignItems: "center" }}>
+                  <Badge color={hCur.color}>{h.currency}</Badge>
+                  <span style={{ color: hCur.color, fontWeight: 700 }}>원가: {fmt(h.cost)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN APP ───
+function CantonFairBizCard() {
+  const [cards, setCards, calcHistory, setCalcHistory] = useStorage();
+  const [activeTab, setActiveTab] = useState("list");
+  const [showScan, setShowScan] = useState(false);
+  const [editCard, setEditCard] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(getApiKey());
+  const [importMode, setImportMode] = useState(null);
+  const [importStatus, setImportStatus] = useState("");
+  const fileInputRef = useRef(null);
+
+  const handleSave = (cardData) => {
+    if (editCard) {
+      setCards(prev => prev.map(c => c.id === editCard.id ? { ...c, ...cardData, updatedAt: new Date().toISOString() } : c));
+    } else {
+      setCards(prev => [{ id: Date.now(), ...cardData, createdAt: new Date().toISOString() }, ...prev]);
+    }
+    setShowScan(false);
+    setEditCard(null);
+  };
+
+  const handleEdit = (card) => {
+    setEditCard(card);
+    setShowScan(true);
+  };
+
+  const handleDelete = (id) => {
+    setCards(prev => prev.filter(c => c.id !== id));
+  };
+
+  const handleStatusChange = (id, status) => {
+    setCards(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+  };
+
+  const handleFileInput = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      setImportStatus("처리 중...");
+      let importedCards = [];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'json') importedCards = await parseJSON(file);
+      else if (ext === 'csv') importedCards = await parseCSV(file);
+      else if (ext === 'xlsx' || ext === 'xls') importedCards = await parseExcel(file);
+      else { alert("지원하지 않는 파일 형식입니다 (JSON, CSV, XLSX)"); return; }
+      if (importMode === 'merge') {
+        setCards(prev => [...prev, ...importedCards]);
+        setImportStatus(`✅ ${importedCards.length}개 데이터 추가됨`);
+      } else if (importMode === 'replace') {
+        setCards(importedCards);
+        setImportStatus(`✅ ${importedCards.length}개 데이터로 교체됨`);
+      }
+      setTimeout(() => setImportMode(null), 2000);
+    } catch(err) {
+      setImportStatus("❌ " + err);
+      setTimeout(() => setImportMode(null), 2000);
+    }
+  };
+
+  const tabs = [
+    { id: "scan", label: "스캔", icon: Icon.scan },
+    { id: "list", label: "카드", icon: Icon.list },
+    { id: "calc", label: "계산기", icon: Icon.calc },
+    { id: "dashboard", label: "분석", icon: Icon.chart },
+  ];
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: T.bg, color: T.text,
+      fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif",
+      maxWidth: 480, margin: "0 auto", position: "relative",
+    }}>
+      {/* Header */}
+      <div style={{
+        background: `linear-gradient(135deg, ${T.accent}DD, #8B6940DD)`,
+        padding: "18px 20px 22px", position: "sticky", top: 0, zIndex: 50,
+        backdropFilter: "blur(10px)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 10, background: "rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+          }}>📇</div>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#fff", letterSpacing: -0.5 }}>
+              Canton Fair CRM
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>
+              제139회 · Gemini AI 명함 스캔 & 고객관리
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <Badge color="#fff" bg="rgba(255,255,255,0.2)">{cards.length}장</Badge>
+            <button onClick={() => setShowSettings(true)} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 8px", cursor: "pointer", color: "#fff", fontSize: 14 }}>⚙️</button>
+          </div>
+        </div>
+      </div>
+
+      {/* FAB - Scan */}
+      <button onClick={() => { setEditCard(null); setShowScan(true); }} style={{
+        position: "fixed", right: 20, bottom: 80, zIndex: 40, width: 56, height: 56,
+        borderRadius: 16, background: T.accent, border: "none", cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: `0 4px 20px ${T.accent}66`, color: "#fff",
+      }}>
+        <div style={{ transform: "scale(1.3)" }}>{Icon.plus}</div>
+      </button>
+
+      {/* Content */}
+      <div style={{ padding: "16px 16px 90px" }}>
+        {activeTab === "list" && (
+          <CardListView
+            cards={cards}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onStatusChange={handleStatusChange}
+          />
+        )}
+        {activeTab === "scan" && (
+          <div style={{ textAlign: "center", padding: "32px 20px" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📸</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 8 }}>명함 스캔 & 등록</div>
+            <div style={{ fontSize: 13, color: T.textSec, marginBottom: 20, lineHeight: 1.6 }}>명함을 촬영하거나 수동으로 입력하세요</div>
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 99, marginBottom: 20,
+              background: getApiKey() ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)",
+              border: "1px solid " + (getApiKey() ? "#22C55E33" : "#F59E0B33"),
+              fontSize: 12, fontWeight: 600, color: getApiKey() ? "#22C55E" : "#F59E0B",
+            }}>{getApiKey() ? "✅ AI 스캔 활성 (Gemini 무료)" : "⚠️ 수동 입력 모드 (⚙️에서 API 키 설정)"}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 320, margin: "0 auto" }}>
+              <Btn onClick={() => { setEditCard(null); setShowScan(true); }} style={{ width: "100%", padding: "14px 20px", fontSize: 15 }}>📷 명함 스캔 / 등록</Btn>
+            </div>
+          </div>
+        )}
+        {activeTab === "dashboard" && <DashboardView cards={cards} />}
+        {activeTab === "calc" && (
+          <CalcView cards={cards} calcHistory={calcHistory} setCalcHistory={setCalcHistory} />
+        )}
+      </div>
+
+      {/* Bottom Tab Bar */}
+      <div style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: 480, background: `${T.surface}F0`,
+        backdropFilter: "blur(20px)", borderTop: `1px solid ${T.border}`,
+        display: "flex", padding: "6px 0 env(safe-area-inset-bottom, 8px)", zIndex: 50,
+      }}>
+        {tabs.map(tab => {
+          const active = activeTab === tab.id;
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              padding: "8px 0", background: "none", border: "none", cursor: "pointer",
+              color: active ? T.accent : T.textDim, transition: "color 0.2s",
+            }}>
+              <div style={{ transform: active ? "scale(1.1)" : "scale(1)", transition: "transform 0.2s" }}>
+                {tab.icon}
+              </div>
+              <span style={{ fontSize: 10, fontWeight: active ? 700 : 500 }}>{tab.label}</span>
+              {active && <div style={{ width: 4, height: 4, borderRadius: 99, background: T.accent }} />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 300, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ width: "90%", maxWidth: 400, background: T.card, borderRadius: 20, padding: 24, border: "1px solid " + T.border }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: T.text }}>⚙️ 설정</span>
+              <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: T.textSec, fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: T.textSec, display: "block", marginBottom: 6 }}>Google Gemini API Key</label>
+              <input type="password" value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} placeholder="AIza..."
+                style={{ width: "100%", padding: "12px", background: T.inputBg, border: "1px solid " + T.border, borderRadius: 10, color: T.text, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
+              <div style={{ fontSize: 11, color: T.textDim, marginTop: 6, lineHeight: 1.5 }}>AI 명함 스캔에 필요 · 무료 사용 가능<br/><a href="https://aistudio.google.com/apikey" target="_blank" style={{ color: T.accent }}>👉 무료 API 키 발급받기 (Google AI Studio)</a></div>
+            </div>
+            <div style={{ padding: "10px 14px", borderRadius: 10, marginBottom: 16, background: apiKeyInput ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)", border: "1px solid " + (apiKeyInput ? "#22C55E33" : "#F59E0B33") }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: apiKeyInput ? "#22C55E" : "#F59E0B" }}>{apiKeyInput ? "✅ AI 스캔 사용 가능 (Gemini 무료)" : "⚠️ 수동 입력 모드"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { saveApiKey(apiKeyInput); setShowSettings(false); }} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>저장</button>
+              {apiKeyInput && <button onClick={() => { setApiKeyInput(""); saveApiKey(""); }} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid " + T.border, background: T.inputBg, color: T.red, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>키 삭제</button>}
+            </div>
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid " + T.border }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 12 }}>📤 데이터 내보내기</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                <button onClick={() => exportToExcel(cards)} style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: T.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>📊 엑셀(XLSX)</button>
+                <button onClick={() => exportToCSV(cards)} style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: T.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>📋 CSV</button>
+                <button onClick={() => exportToJSON(cards)} style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: T.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>🔗 JSON</button>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 12 }}>📥 데이터 가져오기</div>
+              {importStatus && (
+                <div style={{ padding: 10, borderRadius: 8, background: importStatus.includes("✅") ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)", borderLeft: "3px solid " + (importStatus.includes("✅") ? "#22C55E" : "#EF4444"), marginBottom: 12, fontSize: 11, color: importStatus.includes("✅") ? "#22C55E" : "#EF4444" }}>
+                  {importStatus}
+                </div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                <button onClick={() => { setImportMode('replace'); fileInputRef.current?.click(); }} style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: "#3B82F6", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>🔄 파일 열기 (교체)</button>
+                <button onClick={() => { setImportMode('merge'); fileInputRef.current?.click(); }} style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: "#10B981", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>➕ 파일 열기 (병합)</button>
+              </div>
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFileInput} style={{ display: "none" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => { const d=localStorage.getItem(STORAGE_KEY); if(d){const b=new Blob([d],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="cantonfair_backup.json";a.click();} }}
+                style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid " + T.border, background: T.inputBg, color: T.textSec, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>💾 로컬백업</button>
+              <button onClick={() => { if(confirm("모든 데이터를 삭제하시겠습니까?")){localStorage.removeItem(STORAGE_KEY);location.reload();} }}
+                style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #EF444433", background: "rgba(239,68,68,0.08)", color: T.red, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>🗑️ 초기화</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Modal */}
+      {showScan && (
+        <ScanView
+          onSave={handleSave}
+          onCancel={() => { setShowScan(false); setEditCard(null); }}
+          editData={editCard}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CantonFairBizCard />);
+</script>
+</body>
+</html>
